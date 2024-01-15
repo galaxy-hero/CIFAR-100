@@ -90,11 +90,14 @@ def build_model(pretrained=True, fine_tune=True, num_classes=10):
         print('[INFO]: Freezing hidden layers...')
         for params in model.parameters():
             params.requires_grad = False
-    # Change the final classification head.
+
     model.classifier[1] = nn.Linear(in_features=1280, out_features=num_classes)
     return model
-    
-efnb0 = EfficientNet.from_pretrained('efficientnet-b0', num_classes=100)
+
+def get_efnb0():
+    model =  EfficientNet.from_pretrained('efficientnet-b0', num_classes=100)
+
+# efnb0 = EfficientNet.from_pretrained('efficientnet-b0', num_classes=100)
 #efnb0 = nn.Sequential(*list(efnb0.children())[:-1]) # remove fully conn layer at the end
 
 def get_state_dict(self, *args, **kwargs):
@@ -102,8 +105,8 @@ def get_state_dict(self, *args, **kwargs):
     return load_state_dict_from_url(self.url, *args, **kwargs)
 WeightsEnum.get_state_dict = get_state_dict
 
-efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
-test = efficientnet_b0(weights="DEFAULT")
+# efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+# test = efficientnet_b0(weights="DEFAULT")
 
 class CustomModel(nn.Module):
     def __init__(self, base_model, n_classes):

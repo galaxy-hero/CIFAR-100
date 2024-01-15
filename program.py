@@ -1,3 +1,4 @@
+from time import time
 from torchsummary import summary
 import torch
 import torch.nn as nn
@@ -5,6 +6,7 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
 import model as m
 import utils as u
 import dataset as d
@@ -12,7 +14,7 @@ from multiprocessing import freeze_support
 import torch.nn.functional as F
 
 transform = transforms.Compose([
-    transforms.Resize((64, 64)),
+    transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.RandomRotation(10),
@@ -36,14 +38,19 @@ def main():
     #     fine_tune=True, 
     #     num_classes=100
     # )
-    model = m.efnb0
+    # model = m.efnb0
+    model = m.get_efnb0()
 
     model = model.to(u.DEVICE)
     summary(model, input_size=(3, 32, 32))
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=u.LEARNING_RATE, momentum=0.9)
+    # optimizer = optim.SGD(model.parameters(), lr=u.LEARNING_RATE, momentum=0.9)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
-    test_dataset = torchvision.datasets.CIFAR100(root='./data', train=False, download=u.DOWNLOAD_DATA, transform=transform)
+    if u.LOAD_MODEL:
+        u.load_checkpoint(torch.load("checkpoint_1705332388_acc_0.8116.tar"), model)
+
+    test_dataset = torchvision.datasets.CIFAR100(root='./data', train=False, download=u.DOWNLOAD_DATA, transform=transform, target_transform=target_transform)
     test_loader = DataLoader(test_dataset, batch_size=u.BATCH_SIZE_VAL, shuffle=False, num_workers=u.NUM_WORKERS, pin_memory=u.PIN_MEMORY)
 
     dataset = torchvision.datasets.CIFAR100(root='./data', train=True, download=u.DOWNLOAD_DATA, transform=transform, target_transform=target_transform)
@@ -53,16 +60,12 @@ def main():
 
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     
-    train_dataset = d.CachedDataset(train_dataset, device=u.DEVICE)
-    val_dataset = d.CachedDataset(val_dataset, device=u.DEVICE)
+    # train_dataset = d.CachedDataset(train_dataset, device=u.DEVICE)
+    # val_dataset = d.CachedDataset(val_dataset, device=u.DEVICE)
+    
+    train_loader = DataLoader(train_dataset, batch_size=u.BATCH_SIZE_TRAIN, shuffle=True, num_workers=u.NUM_WORKERS, pin_memory=u.PIN_MEMORY)
+    val_loader = DataLoader(val_dataset, batch_size=u.BATCH_SIZE_VAL, shuffle=False, num_workers=u.NUM_WORKERS, pin_memory=u.PIN_MEMORY)
 
-    # train_loader = DataLoader(train_dataset, batch_size=u.BATCH_SIZE_TRAIN, shuffle=True, num_workers=u.NUM_WORKERS, pin_memory=u.PIN_MEMORY)
-    # val_loader = DataLoader(val_dataset, batch_size=u.BATCH_SIZE_VAL, shuffle=False, num_workers=u.NUM_WORKERS, pin_memory=u.PIN_MEMORY)
-
-    train_loader = DataLoader(train_dataset, batch_size=u.BATCH_SIZE_TRAIN, shuffle=True, pin_memory=False)
-    val_loader = DataLoader(val_dataset, batch_size=u.BATCH_SIZE_VAL, shuffle=False, pin_memory=False)
-
-    # config for charts and shit
     config = m.ModelConfiguration(
         epochs=u.NUM_EPOCHS, 
         learning_rate=u.LEARNING_RATE,
@@ -72,68 +75,73 @@ def main():
         num_workers=u.NUM_WORKERS,
         pin_memory=u.PIN_MEMORY,
         optimizer=torch.optim.Adam)
+    if not u.VAL_ONLY:
+        train(model, optimizer, criterion, train_loader, val_loader)
+    else:
+        val_loss, val_acc = do_validation(model, criterion, test_loader, -1)
 
-    train(model, optimizer, criterion, train_loader, val_loader)
+        print(f'Validation Loss: {val_loss}, Accuracy: {val_acc}')
 
-def train(model, optimizer, criterion, train_loader, val_loader):
+def do_train(model, optimizer, criterion, train_loader, epoch):
+    model.train()
+    
+    loop = tqdm(train_loader, desc=f"Training Epoch: {epoch+1}")
+
+    for _, (inputs, labels) in enumerate(loop):
+        inputs = inputs.to(u.DEVICE)
+        labels = labels.to(u.DEVICE)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        loop.set_postfix(loss=loss.item())
+    return loss
+
+def do_validation(model, criterion, val_loader, epoch):
+    model.eval()
+        
     all_outputs = []
     all_labels = []
-    
-    for epoch in range(u.NUM_EPOCHS):
-        model.train()
-        for inputs, labels in train_loader:
-            #labels = labels.int()
-            # encoded_labels = torch.zeros(u.BATCH_SIZE_TRAIN, 100)
-            # for index, label in enumerate(labels):
-            #     encoded_labels[index][label] = 1
+    val_loss = 0.0
 
-            # inputs = inputs.to(u.DEVICE)
-            # labels = encoded_labels.to(u.DEVICE)
-            optimizer.zero_grad()
+    with torch.no_grad():
+        loop = tqdm(val_loader, desc=f"Validation Epoch: {epoch+1}")
+        
+        for _, (inputs, labels) in enumerate(loop):
+            inputs = inputs.to(u.DEVICE)
+            labels = labels.to(u.DEVICE)
             outputs = model(inputs)
+            outputs = outputs
+            
+            all_labels.append(labels)
+            all_outputs.append(outputs)
 
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            val_loss += criterion(outputs, labels).item()
+            loop.set_postfix(loss=val_loss)
 
-        model.eval()
+
+    val_loss /= len(val_loader)
+    all_outputs = torch.cat(all_outputs).argmax(dim=1)
+    all_labels = torch.cat(all_labels).argmax(dim=1)
+    accuracy = u.accuracy(all_outputs, all_labels)
+
+    return val_loss, accuracy
+
+def train(model, optimizer, criterion, train_loader, val_loader):    
+    for epoch in range(u.NUM_EPOCHS):
+        train_loss = do_train(model, optimizer, criterion, train_loader, epoch)
+        val_loss, val_acc = do_validation(model, criterion, val_loader, epoch)
+
+        print(f'Epoch [{epoch+1}/{u.NUM_EPOCHS}], Loss: {train_loss.item()}, Validation Loss: {val_loss}, Accuracy: {val_acc}')
         
-        all_outputs = []
-        all_labels = []
-        
-        with torch.no_grad():
-            val_loss = 0.0
-            for inputs, labels in val_loader:
-                # inputs = inputs.to(u.DEVICE)
-                # labels = labels.to(u.DEVICE)
-                outputs = model(inputs)
-                outputs = outputs
-                
-                all_labels.append(labels)
-                all_outputs.append(outputs)
-
-                val_loss += criterion(outputs, labels).item()
-
-        val_loss /= len(val_loader)
-        all_outputs = torch.cat(all_outputs).argmax(dim=1)
-        #print(all_outputs[:100])
-        all_labels = torch.cat(all_labels).argmax(dim=1)
-        #print(all_labels[:100])
-
-        epoch_acc = u.accuracy(all_outputs, all_labels)
-
-        print(f'Epoch [{epoch+1}/{u.NUM_EPOCHS}], Loss: {loss.item()}, Validation Loss: {val_loss}, Accuracy: {epoch_acc}')
-
-        # early stopping
-        # if val_loss < best_val_loss:
-        #     best_val_loss = val_loss
-        #     counter = 0
-        # else:
-        #     counter += 1
-
-        # if counter >= u.EARLY_STOP_EPOCHS:
-        #     print(f'Early stopping after {u.EARLY_STOP_EPOCHS} epochs of no improvement.')
-        #     break
+        checkpoint = {
+            "state_dict": model.state_dict(),
+            "optimizer": optimizer.state_dict()
+        }
+        u.save_checkpoint(checkpoint, filename=f"checkpoint_{int(time())}_acc_{val_acc:.4f}.tar")
 
 if __name__ == "__main__":
     freeze_support()
