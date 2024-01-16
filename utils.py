@@ -1,15 +1,15 @@
 import torch
 
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.0001
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE_TRAIN = 32
 BATCH_SIZE_VAL = 32
-NUM_EPOCHS = 20
+NUM_EPOCHS = 30
 EARLY_STOP_EPOCHS = 5
 NUM_WORKERS = 8
 PIN_MEMORY = True if torch.cuda.is_available() else False
-LOAD_MODEL = False
-VAL_ONLY = False
+LOAD_MODEL = True
+VAL_ONLY = True
 DOWNLOAD_DATA = True
 
 def accuracy(output, labels):

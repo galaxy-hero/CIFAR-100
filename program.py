@@ -12,6 +12,7 @@ import utils as u
 import dataset as d
 from multiprocessing import freeze_support
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -30,25 +31,16 @@ def target_transform(label):
     return encoded_label
 
 def main():
-    #model = m.SimpleCNN()
-    #model = m.CNNWithBatchNorm()
-    #model = m.CustomModel(m.efnb0, 100)
-    # model = m.build_model(
-    #     pretrained=True, 
-    #     fine_tune=True, 
-    #     num_classes=100
-    # )
-    # model = m.efnb0
-    model = m.get_efnb0()
+    model = m.CustomEfficientNetB0(100)
 
     model = model.to(u.DEVICE)
-    summary(model, input_size=(3, 32, 32))
+    #summary(model, input_size=(3, 32, 32))
     criterion = nn.CrossEntropyLoss()
     # optimizer = optim.SGD(model.parameters(), lr=u.LEARNING_RATE, momentum=0.9)
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=u.LEARNING_RATE)
 
     if u.LOAD_MODEL:
-        u.load_checkpoint(torch.load("checkpoint_1705332388_acc_0.8116.tar"), model)
+        u.load_checkpoint(torch.load("checkpoint_1705369518_acc_0.8230.tar"), model)
 
     test_dataset = torchvision.datasets.CIFAR100(root='./data', train=False, download=u.DOWNLOAD_DATA, transform=transform, target_transform=target_transform)
     test_loader = DataLoader(test_dataset, batch_size=u.BATCH_SIZE_VAL, shuffle=False, num_workers=u.NUM_WORKERS, pin_memory=u.PIN_MEMORY)
@@ -75,8 +67,12 @@ def main():
         num_workers=u.NUM_WORKERS,
         pin_memory=u.PIN_MEMORY,
         optimizer=torch.optim.Adam)
+    
+    early_stop = m.EarlyStopping(patience=5, verbose=1)
+    rlrop = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, min_lr=1e-6, verbose=1)
+
     if not u.VAL_ONLY:
-        train(model, optimizer, criterion, train_loader, val_loader)
+        train(model, optimizer, criterion, train_loader, val_loader, early_stop, rlrop)
     else:
         val_loss, val_acc = do_validation(model, criterion, test_loader, -1)
 
@@ -110,7 +106,7 @@ def do_validation(model, criterion, val_loader, epoch):
     with torch.no_grad():
         loop = tqdm(val_loader, desc=f"Validation Epoch: {epoch+1}")
         
-        for _, (inputs, labels) in enumerate(loop):
+        for batch, (inputs, labels) in enumerate(loop):
             inputs = inputs.to(u.DEVICE)
             labels = labels.to(u.DEVICE)
             outputs = model(inputs)
@@ -120,7 +116,7 @@ def do_validation(model, criterion, val_loader, epoch):
             all_outputs.append(outputs)
 
             val_loss += criterion(outputs, labels).item()
-            loop.set_postfix(loss=val_loss)
+            loop.set_postfix(loss=val_loss / (batch + 1))
 
 
     val_loss /= len(val_loader)
@@ -130,7 +126,7 @@ def do_validation(model, criterion, val_loader, epoch):
 
     return val_loss, accuracy
 
-def train(model, optimizer, criterion, train_loader, val_loader):    
+def train(model, optimizer, criterion, train_loader, val_loader, early_stop, rlrop):    
     for epoch in range(u.NUM_EPOCHS):
         train_loss = do_train(model, optimizer, criterion, train_loader, epoch)
         val_loss, val_acc = do_validation(model, criterion, val_loader, epoch)
@@ -142,6 +138,13 @@ def train(model, optimizer, criterion, train_loader, val_loader):
             "optimizer": optimizer.state_dict()
         }
         u.save_checkpoint(checkpoint, filename=f"checkpoint_{int(time())}_acc_{val_acc:.4f}.tar")
+
+        if early_stop(val_loss):
+            print("Early stopping")
+            #break
+
+        rlrop.step(val_loss)
+
 
 if __name__ == "__main__":
     freeze_support()

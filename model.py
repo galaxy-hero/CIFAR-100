@@ -31,6 +31,27 @@ class ModelConfiguration(BaseModel):
     # architecture: Optional[str] = "MLP"
     # dataset: Optional[str] = "CIFAR-100"
 
+class EarlyStopping:
+    def __init__(self, patience=10, verbose=1):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+
+    def __call__(self, val_loss):
+        if self.best_score is None:
+            self.best_score = val_loss
+        elif val_loss > self.best_score:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = val_loss
+            self.counter = 0
+
+        return self.early_stop
+
 
 # class SimpleCNN(nn.Module):
 #     def __init__(self, num_classes=100):
@@ -83,11 +104,9 @@ def build_model(pretrained=True, fine_tune=True, num_classes=10):
         print('[INFO]: Not loading pre-trained weights')
     model = models.efficientnet_b0(pretrained=pretrained)
     if fine_tune:
-        print('[INFO]: Fine-tuning all layers...')
         for params in model.parameters():
             params.requires_grad = True
     elif not fine_tune:
-        print('[INFO]: Freezing hidden layers...')
         for params in model.parameters():
             params.requires_grad = False
 
@@ -95,7 +114,26 @@ def build_model(pretrained=True, fine_tune=True, num_classes=10):
     return model
 
 def get_efnb0():
-    model =  EfficientNet.from_pretrained('efficientnet-b0', num_classes=100)
+    return EfficientNet.from_pretrained('efficientnet-b0', num_classes=100)
+
+class CustomEfficientNetB0(nn.Module):
+    def __init__(self, num_classes, dropout_rate=0.5):
+        super(CustomEfficientNetB0, self).__init__()
+        
+        self.efnb0 = EfficientNet.from_pretrained('efficientnet-b0', num_classes=1000)
+        self.num_f = self.efnb0._fc.in_features
+        self.efnb0._fc = nn.Identity()
+        self.global_avg_pooling = nn.AdaptiveAvgPool2d(1280)
+        self.dropout = nn.Dropout(p=dropout_rate)
+        self.fc = nn.Linear(self.num_f, num_classes)
+
+    def forward(self, x):
+        x = self.efnb0(x)
+        #x = self.global_avg_pooling(x)
+        #x = x.view(x.size(0), -1)
+        x = self.dropout(x)
+        x = self.fc(x)
+        return x
 
 # efnb0 = EfficientNet.from_pretrained('efficientnet-b0', num_classes=100)
 #efnb0 = nn.Sequential(*list(efnb0.children())[:-1]) # remove fully conn layer at the end
