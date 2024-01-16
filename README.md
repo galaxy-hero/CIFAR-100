@@ -27,11 +27,11 @@ The number of channels we chose is between *128* and *256*. We tried gradually d
 
 ### Pre-trained model with transfer learning
 The best model for reaching an accuracy higher than 80% is to use a pre-trained one. We chose the **EfficientNetB0** model, with the addition of a final dropout layer using a *0.5* dropout rate, and adding another layer to turn 1000 outputs into 100 to match our number of classes. With this model we were able to achieve around *83%* accuracy. 
-It is important to mention that, since we are using a pretrained model that was trained on images of size *244 x 244*, our images of *32 x 32* must be **resized** to reach the best accuracy.
+It is important to mention that, since we are using a pretrained model that was trained on images of size *224 x 224*, our images of *32 x 32* must be **resized** to reach the best accuracy.
 Using a cached dataset worked great before adding transfer learning, because it moved the whole data set on the GPU beforehand, so we didn't need to go back and retrieve each batch for each epoch.
 Now a cached dataset is *infeasible*, because the images are very large and the GPU V-RAM will be filled before the model even gets to learn something, raising a *CUDA out of memory exception*.
 The **batch size** is also extremely important at this point, and it makes the difference between the program being able to run on any machine versus only on machines with very good GPUs and lots of GPU RAM. For example for an image size of 128 x 128 (increased) and batch size of 64, while using cached dataset, the program was able to run on GPU GeForce 4070 with 8GB of GPU RAM, while it did not work on GeForce 3060 with 6GB of GPU RAM.
-Removing cached dataset and decreasing the batch size to 32 allows us to resize our images to 244 x 244 and it should work on any machine. If it doesn't, then the batch size should be decreased further.
+Removing cached dataset and decreasing the batch size to 32 allows us to resize our images to 224 x 224 and it should work on any machine. If it doesn't, then the batch size should be decreased further.
 
 ## Hyperparameters
 
